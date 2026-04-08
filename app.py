@@ -272,24 +272,59 @@ for k, v in DEFAULTS.items():
 # OCR & TEXT EXTRACTION
 # ══════════════════════════════════════════════════════════════════════════════
 def run_ocr(image: Image.Image) -> tuple:
-    def try_ocr(img, cfg):
+    """Run OCR on image. Returns (text, warnings_list).
+    Captures actual error messages instead of swallowing exceptions."""
+    errors = []
+    best_text = ""
+
+    def try_ocr(img, cfg, label):
+        nonlocal best_text
         try:
             t = pytesseract.image_to_string(img, config=cfg).strip()
-            return t if len(t) > 30 else ""
-        except Exception: return ""
-    img = image.convert("RGB")
-    w, h = img.size
-    if w < 1000:
-        img = img.resize((1000, int(h * 1000 / w)), Image.LANCZOS)
-    img = ImageEnhance.Contrast(img).enhance(2.0)
-    img = ImageEnhance.Sharpness(img).enhance(2.0)
-    gray = img.convert("L")
-    for cfg in ["--psm 6 --oem 3", "--psm 11", "--psm 3"]:
-        t = try_ocr(gray, cfg)
-        if t: return t, []
-    t = try_ocr(image.convert("RGB"), "--psm 6")
-    if t: return t, []
-    return "", ["⚠️ OCR failed. Please paste text in the Text tab."]
+            if len(t) > len(best_text):
+                best_text = t
+            return t
+        except pytesseract.TesseractNotFoundError as e:
+            errors.append(f"❌ Tesseract binary not found. Add 'tesseract-ocr' to packages.txt")
+            return ""
+        except Exception as e:
+            errors.append(f"⚠️ OCR error ({label}): {str(e)[:150]}")
+            return ""
+
+    # Preprocess
+    try:
+        img = image.convert("RGB")
+        w, h = img.size
+        if w < 1000:
+            img = img.resize((1000, int(h * 1000 / w)), Image.LANCZOS)
+        img_enhanced = ImageEnhance.Contrast(img).enhance(2.0)
+        img_enhanced = ImageEnhance.Sharpness(img_enhanced).enhance(2.0)
+        gray = img_enhanced.convert("L")
+    except Exception as e:
+        return "", [f"❌ Image preprocessing failed: {str(e)[:150]}"]
+
+    # Try multiple configs on preprocessed grayscale
+    for cfg, label in [("--psm 6 --oem 3", "psm6"),
+                       ("--psm 11", "psm11"),
+                       ("--psm 3", "psm3"),
+                       ("--psm 4", "psm4")]:
+        t = try_ocr(gray, cfg, label)
+        if len(t) > 30:
+            return t, []
+
+    # Try on original color image
+    t = try_ocr(image.convert("RGB"), "--psm 6", "color-psm6")
+    if len(t) > 30:
+        return t, []
+
+    # Accept shorter text if we got something
+    if len(best_text) > 5:
+        return best_text, [f"⚠️ Only extracted {len(best_text)} chars — image may be low quality"]
+
+    # Complete failure — return captured errors
+    if not errors:
+        errors.append("⚠️ OCR returned empty text. Image may be too blurry or have no readable text.")
+    return "", errors
 
 
 def extract_docx_text(file_bytes: bytes) -> str:
