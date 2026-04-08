@@ -764,7 +764,12 @@ with col_left:
         st.session_state.ocr_warnings = ocr_warnings
 
         if not combined_text:
-            st.error("❌ No text extracted. Please paste content in the Text tab."); st.stop()
+            st.error("❌ No text extracted. See details below:")
+            # Display the actual OCR warnings inline so user can see what failed
+            for w in ocr_warnings:
+                st.warning(w)
+            st.info("💡 **Workaround:** Open your image, copy any visible text, and paste it into the '📝 Text / Jira Story' tab instead.")
+            st.stop()
         st.session_state.extracted_text = combined_text
 
         feature_name = "Feature"
